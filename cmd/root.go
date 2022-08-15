@@ -12,9 +12,6 @@ var rootCmd = &cobra.Command{
 	Use:   "asc",
 	Short: "asc - Arkadius Schuchhardt CLI tool",
 	Long:  `asc is Arkadius Schuchhardt fancy personal CLI tool`,
-	Run: func(cmd *cobra.Command, args []string) {
-
-	},
 }
 
 func Execute() {
