@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -11,37 +12,23 @@ import (
 	"github.com/xanzy/go-gitlab"
 )
 
-var gitlabCmd = &cobra.Command{
-	Use:   "gitlab",
-	Short: "Gitlab Command",
-	Long:  `This command allows the user different gitlab operations.`,
+type GitlabConfig struct {
+	searchNamespace  bool
+	searchMembership bool
 }
 
-var searchCmd = &cobra.Command{
-	Use:   "search",
-	Short: "Gitlab Search & Open Command",
-	Long:  `This command allows the user to search for a project and open it.`,
-	Args:  cobra.MinimumNArgs(1),
-	Run:   projectSearchAndOpen,
-}
-
-func projectSearchAndOpen(cmd *cobra.Command, args []string) {
-	gitlabClient := getGitlabClient(cmd)
+func projectSearchAndOpen(args []string, gitlabConfig GitlabConfig) {
+	gitlabClient := getGitlabClient()
 	searchString := strings.Join(args, " ")
-	membership, _ := cmd.Flags().GetBool("membership")
-	namespace, _ := cmd.Flags().GetBool("namespace")
 
 	listProjectOptions := &gitlab.ListProjectsOptions{
 		Search:           gitlab.String(searchString),
-		SearchNamespaces: gitlab.Bool(namespace),
-		Membership:       gitlab.Bool(membership),
+		SearchNamespaces: gitlab.Bool(gitlabConfig.searchNamespace),
+		Membership:       gitlab.Bool(gitlabConfig.searchMembership),
 	}
 
 	projects, _, err := gitlabClient.Projects.ListProjects(listProjectOptions)
-	if err != nil {
-		cmd.PrintErr(err)
-		os.Exit(1)
-	}
+	cobra.CheckErr(err)
 
 	var projectNamesWithNamespace, projectNames []string
 	projectMap := make(map[string]*gitlab.Project)
@@ -61,21 +48,22 @@ func projectSearchAndOpen(cmd *cobra.Command, args []string) {
 	selectedProjectUrl := projectMap[selectedProjectName].HTTPURLToRepo
 
 	if err != nil {
-		cmd.PrintErrf("Prompt for project selection failed %v\n", err)
-		return
+		fmt.Printf("Prompt for project selection failed %v\n", err)
+		os.Exit(1)
 	}
 
-	cmd.Println("Opening project", selectedProjectNameWithNamespace)
+	fmt.Println("Opening project", selectedProjectNameWithNamespace)
 	if err := exists("xdg-open", "--manual"); err != nil {
-		cmd.Printf("Cannot open project in the browser (%v). The url to the project is: %v \n", err, selectedProjectUrl)
+		fmt.Printf("Cannot open project in the browser (%v). The url to the project is: %v \n", err, selectedProjectUrl)
 	} else {
 		bash_cmd := exec.Command("xdg-open", selectedProjectUrl)
 		err := bash_cmd.Run()
 
 		if err != nil {
-			cmd.PrintErr(err)
+			fmt.Print(err)
+			os.Exit(1)
 		} else {
-			cmd.Printf("Opened project %v in the browser.\n", selectedProjectName)
+			fmt.Printf("Opened project %v in the browser.\n", selectedProjectName)
 		}
 	}
 }
@@ -87,21 +75,38 @@ func exists(app string, arg ...string) error {
 	return bash_cmd.Run()
 }
 
-func getGitlabClient(cmd *cobra.Command) *gitlab.Client {
-	gitlab_token := viper.GetString("gitlab_token")
-	gitlab_url := viper.GetString("gitlab_url")
-	gitlab, err := gitlab.NewClient(gitlab_token, gitlab.WithBaseURL(gitlab_url))
+func getGitlabClient() *gitlab.Client {
+	gitlabUrl := viper.GetString("gitlab_url")
+	gitlabToken := viper.GetString("gitlab_token")
+	gitlab, err := gitlab.NewClient(gitlabToken, gitlab.WithBaseURL(gitlabUrl))
 	if err != nil {
-		cmd.PrintErrf("Failed to create GitLab client (%v).\n", err)
+		fmt.Printf("Failed to create GitLab client (%v).\n", err)
 		os.Exit(1)
 	}
 	return gitlab
 }
 
 func init() {
+	gitlabConfig := GitlabConfig{}
+
+	var gitlabCmd = &cobra.Command{
+		Use:   "gitlab",
+		Short: "Gitlab Command",
+		Long:  `This command allows the user different gitlab operations.`,
+	}
+
+	var searchCmd = &cobra.Command{
+		Use:   "search",
+		Short: "Gitlab Search & Open Command",
+		Long:  `This command allows the user to search for a project and open it.`,
+		Args:  cobra.MinimumNArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			projectSearchAndOpen(args, gitlabConfig)
+		},
+	}
 	rootCmd.AddCommand(gitlabCmd)
 	gitlabCmd.AddCommand(searchCmd)
 
-	gitlabCmd.Flags().BoolP("membership", "m", false, "Limit by projects that the current user is a member of.")
-	gitlabCmd.Flags().BoolP("namespace", "n", true, "Include ancestor namespaces when matching search criteria. ")
+	searchCmd.Flags().BoolVarP(&gitlabConfig.searchMembership, "membership", "m", false, "Limit by projects that the current user is a member of.")
+	searchCmd.Flags().BoolVarP(&gitlabConfig.searchNamespace, "namespace", "n", true, "Include ancestor namespaces when matching search criteria.")
 }
