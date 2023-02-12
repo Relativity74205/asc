@@ -1,4 +1,6 @@
-# local install
+# CLI Tool for gitlab project search
+
+## local install
 
 ```bash
 go build .
